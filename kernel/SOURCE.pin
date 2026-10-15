@@ -1,0 +1,67 @@
+# =============================================================================
+# Packet 181-steamlink-kernel-rebuild  --  pinned build inputs
+# =============================================================================
+# Every value here is either a measured hash or a resolvable pin.  Nothing is
+# inferred: the base config sha256 is the shipped /boot/config-6.1.115-steam on
+# the mounted stick (and inside the djmuted bookworm image), and the toolchain
+# version string below is the one embedded in the deployed kernel's
+# /proc/version, which proves this SDK commit is the compiler that built it.
+# =============================================================================
+
+# --- kernel source -----------------------------------------------------------
+KERNEL_VERSION=6.1.115
+KERNEL_LOCALVERSION=-steam
+KERNEL_SOURCE_URL=https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.115.tar.xz
+KERNEL_SOURCE_SHA256=0fd8ba827e1f1888376d88fd1d1c80d707c587c75b0f18c26530824be437ba6f
+# From cdn.kernel.org/pub/linux/kernel/v6.x/sha256sums.asc (the signed manifest).
+
+# --- base config (shipped with the djmuted Debian 12 image) ------------------
+BASE_CONFIG=config-6.1.115-steam.base
+BASE_CONFIG_SHA256=cc9a9833e70540498d1dbca7206e9a119e228f1dda06b8eb0408b1a591170eb0
+BASE_CONFIG_LINES=4014
+# Note: CONFIG_LOCALVERSION="" in this file.  The "-steam" in
+# `uname -r` = 6.1.115-steam comes from `make LOCALVERSION=-steam` on the
+# command line, NOT from the config.  Reproduce that or /lib/modules/<rel>
+# and the initramfs stop matching.
+
+# --- config delta ------------------------------------------------------------
+DELTA_CONFIG=config-6.1.115-steam.delta
+
+# --- cross toolchain (Valve Steam Link SDK) ----------------------------------
+SDK_URL=https://github.com/ValveSoftware/steamlink-sdk.git
+SDK_COMMIT=31a376a3b4cfd26cf8c470c904529032608ae7ee
+SDK_COMMIT_SUBJECT=Updated with firmware changes as of build 890
+TOOLCHAIN_DIR=toolchain/bin
+CROSS_COMPILE=armv7a-cros-linux-gnueabi-
+TOOLCHAIN_VERSION=9.2.0
+# Deployed kernel reports: armv7a-cros-linux-gnueabi-gcc (GCC) 9.2.0
+# The SDK toolchain binaries need their bundled libs on LD_LIBRARY_PATH:
+TOOLCHAIN_LD_LIBRARY_PATH=toolchain/lib
+
+# --- build identity embedded in the image (UTS_VERSION) ----------------------
+# Kernel 6.1 generates two UTS_VERSION headers: init/utsversion-tmp.h (a
+# placeholder, force-included by version.o) and include/generated/utsversion.h
+# (the final one, force-included by version-timestamp.o -- whose strong
+# linux_banner[] wins the link; version.o only has a weak one).  Both fall back
+# to empty strings unless these variables reach make, so build.sh pins them:
+# that is what makes the banner honest and the artefact byte-reproducible.
+# The deployed image was built the same way (it reports "#1 PREEMPT Fri Nov  8
+# 22:51:44 UTC 2024" and identifies as root@steamlink); our recipes set the
+# identity explicitly instead of impersonating the author, and both pin the same
+# values. The host name used for the released image is not published: it is a
+# build artefact, not part of this project, and `build.sh` defaults it to
+# `localhost`.
+KBUILD_BUILD_USER=steamlink
+KBUILD_BUILD_HOST=localhost
+KBUILD_BUILD_VERSION=1
+KBUILD_BUILD_TIMESTAMP=Wed Oct 14 00:00:00 UTC 2026
+
+# --- build identity ----------------------------------------------------------
+ARCH=arm
+TARGET_DEVICE=198.51.100.10
+TARGET_USER=debian
+# Build tree is disposable; the reproducible inputs are the pins above.
+BUILD_ROOT_DEFAULT=$HOME/build/steamlink-kernel
+# Artefacts to install: zImage, config-6.1.115-steam, lib/modules/6.1.115-steam.
+# Left untouched by design: /boot/kexec_load.ko (stock 3.8.13-mrvl),
+# /boot/berlin2cd-valve-steamlink.dtb, /boot/initramfs-linux-steam.img.

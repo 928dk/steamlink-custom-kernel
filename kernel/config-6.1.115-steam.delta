@@ -1,0 +1,102 @@
+# =============================================================================
+# Steam Link kernel config delta  --  packet 181-steamlink-kernel-rebuild
+# =============================================================================
+# Base config : shipped /boot/config-6.1.115-steam  (Debian 12 bookworm image)
+#   sha256    : cc9a9833e70540498d1dbca7206e9a119e228f1dda06b8eb0408b1a591170eb0
+#   lines     : 4014
+# Kernel      : vanilla linux-6.1.115 (cdn.kernel.org)
+#   Aliases   : ARCH=arm  CROSS_COMPILE=armv7a-cros-linux-gnueabi-  LOCALVERSION=-steam
+# Toolchain   : ValveSoftware/steamlink-sdk @ 31a376a3b4cfd26cf8c470c904529032608ae7ee
+#
+# Apply:
+#   cp <base config> .config
+#   cat config-6.1.115-steam.delta >> .config
+#   make ARCH=arm olddefconfig
+#   scripts/diffconfig .config.base .config      # review every line
+#
+# The `-steam` release suffix is NOT in the base config (CONFIG_LOCALVERSION is
+# empty there); it comes from `make LOCALVERSION=-steam`. Keep passing it or
+# /lib/modules/6.1.115-steam stops matching.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# REQ-002  Policy routing for Tailscale's subnet router (fwmark -> ip rule).
+# Was:  # CONFIG_IP_ADVANCED_ROUTER is not set
+# Was:  <symbol absent>   (IP_MULTIPLE_TABLES depends on IP_ADVANCED_ROUTER)
+# Symptom: `ip rule show` -> RTNETLINK answers: Address family not supported
+#          by protocol.  CONFIG_FIB_RULES=y was already set for IPv6.
+# -----------------------------------------------------------------------------
+CONFIG_IP_ADVANCED_ROUTER=y
+CONFIG_IP_MULTIPLE_TABLES=y
+
+# -----------------------------------------------------------------------------
+# REQ-002  CONNMARK, the reason tailscaled logged
+#   "router config failed (enabling connmark rules ... Extension CONNMARK
+#    revision 0 not supported, missing kernel module?)"
+# Both the target (-j CONNMARK) and the match (-m connmark) are gated behind
+# NETFILTER_ADVANCED.  NF_CONNTRACK is already =m, so these can only be m.
+# -----------------------------------------------------------------------------
+CONFIG_NETFILTER_ADVANCED=y
+CONFIG_NETFILTER_XT_TARGET_CONNMARK=m
+CONFIG_NETFILTER_XT_MATCH_CONNMARK=m
+
+# -----------------------------------------------------------------------------
+# REQ-002  nftables path (belt-and-braces: /usr/sbin/nft exists on the box, so
+# tailscaled prefers the nft backend once NF_TABLES is present).  Minimal
+# expression set: ct (=NFT_CT) for mark save/restore, masquerade/nat for
+# subnet forwarding, log + counter are used by the rule-set, fib for the
+# "fib daddr type local" checks.  `counter` needs no symbol of its own.
+# -----------------------------------------------------------------------------
+CONFIG_NF_TABLES=y
+CONFIG_NF_TABLES_INET=y
+CONFIG_NF_TABLES_IPV4=y
+CONFIG_NF_TABLES_IPV6=y
+CONFIG_NFT_CT=m
+CONFIG_NFT_MASQ=m
+CONFIG_NFT_NAT=m
+CONFIG_NFT_LOG=m
+CONFIG_NFT_FIB_INET=m
+
+# -----------------------------------------------------------------------------
+# REQ-003 (F3)  Make the kexec/bootloader command line effective.
+# Was: CONFIG_CMDLINE_FORCE=y  ->  the `--command-line` handed to kexec was
+#      inert, so `log_buf_len=256K` and `usbcore.autosuspend=-1` from
+# factory_test/run.sh did nothing and the ring buffer stayed at 16 KiB.
+# ARM has these three as a mutually-exclusive choice; CONFIG_CMDLINE stays as
+# the default and the boot-loader arguments are appended to it.
+# -----------------------------------------------------------------------------
+CONFIG_CMDLINE_EXTEND=y
+# CONFIG_CMDLINE_FORCE is not set
+CONFIG_LOG_BUF_SHIFT=17
+
+# -----------------------------------------------------------------------------
+# REQ-004  F4: netconsole.  eth0 is pxa168-eth, built into the image, and it
+# implements .ndo_poll_controller -- so a built-in netconsole can log over it.
+# NETPOLL and NET_POLL_CONTROLLER are `def_bool NETCONSOLE`, so enabling
+# NETCONSOLE is sufficient and is what makes that ndo_poll_controller compile
+# in (pxa168_eth guards it with #ifdef CONFIG_NET_POLL_CONTROLLER).
+#
+# Capture path: built-in netconsole reads `netconsole=<src>@<dev>,<dst>`
+# from the kernel command line (`__setup("netconsole=", ...)` in
+# drivers/net/netconsole.c) -- precisely the command line that the F3 change
+# above makes effective again.
+#
+# NETCONSOLE_DYNAMIC is deliberately NOT enabled: Kconfig gates it with
+#     depends on NETCONSOLE && SYSFS && CONFIGFS_FS && !(NETCONSOLE=y && CONFIGFS_FS=m)
+# and CONFIGFS_FS is =m in the base config, so a built-in netconsole cannot
+# offer configfs reconfiguration.  Raising CONFIGFS_FS to =y is a wider change
+# than this packet's delta and buys nothing the command line does not already
+# give, so the option stays out.
+# -----------------------------------------------------------------------------
+CONFIG_NETCONSOLE=y
+
+# -----------------------------------------------------------------------------
+# REQ-004  pstore: ASSESSED, built, but inert on this box.
+# ramoops needs a reserved-memory node in berlin2cd-valve-steamlink.dtb and
+# this packet keeps the DTB byte-identical (REQ-005).  Enabling the options
+# now means a future DTB edit activates them without another kernel rebuild.
+# F4's primary need is already met by netconsole above.
+# -----------------------------------------------------------------------------
+CONFIG_PSTORE=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_RAM=m
